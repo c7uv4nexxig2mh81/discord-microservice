@@ -9,7 +9,7 @@ async fn main() -> std::io::Result<()> {
     // Initialize configuration and logger
     let _cfg = config::init();
 
-    log::info!("Starting Discord OAuth microservice on 0.0.0.0:8080");
+    log::info!("listening OAuth microservice on 0.0.0.0:8080");
 
     HttpServer::new(|| {
         App::new()

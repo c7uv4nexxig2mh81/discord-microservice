@@ -1,37 +1,28 @@
 // src/routes.rs
-use actix_web::{web, get, HttpResponse, Responder, HttpRequest};
-use uuid::Uuid;
-use std::collections::HashMap;
+use actix_web::{web, get, HttpResponse, HttpRequest, Responder};
 use serde_json::json;
+use std::collections::HashMap;
+use uuid::Uuid;
 
 use crate::{discord, session};
 
-/// Redirect user to Discord OAuth2 authorization page
 #[get("/discord")]
 pub async fn discord_oauth() -> impl Responder {
-    let state = Uuid::new_v4().to_string();
     HttpResponse::Found()
-        .append_header(("Location", discord::build_oauth_url(&state)))
+        .append_header(("Location", discord::build_oauth_url(&Uuid::new_v4().to_string())))
         .finish()
 }
 
-/// Handle Discord OAuth2 callback and link account
 #[get("/discord/callback")]
-pub async fn discord_callback(
-    query: web::Query<HashMap<String, String>>,
-    req: HttpRequest,
-) -> impl Responder {
+pub async fn discord_callback(query: web::Query<HashMap<String, String>>, req: HttpRequest) -> impl Responder {
     let code = match query.get("code") {
         Some(c) => c,
         None => return HttpResponse::BadRequest().body("Missing code"),
     };
 
-    let session_cookie = match req.cookie("session") {
-        Some(c) => c.value().to_string(),
-        None => return HttpResponse::Unauthorized().body("Missing session cookie"),
-    };
-
-    let user_id = match session::verify_session(&session_cookie).await {
+    let user_id = match req.cookie("session").and_then(|c| Some(c.value().to_string()))
+        .and_then(|c| futures::executor::block_on(session::verify_session(&c)))
+    {
         Some(id) => id,
         None => return HttpResponse::Unauthorized().body("Invalid session"),
     };
@@ -59,7 +50,6 @@ pub async fn discord_callback(
     }))
 }
 
-/// Mount Discord routes
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(discord_oauth);
     cfg.service(discord_callback);
