@@ -1,3 +1,4 @@
+// src/session.rs
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -11,7 +12,7 @@ struct SessionResponse { user_id: String }
 pub async fn verify_session(cookie: &str) -> Option<String> {
     if cookie.is_empty() { return None; }
     let url = format!("{}/internal/auth/session", env::var("MAIN_API_URL").ok()?);
-    
+
     Some(
         CLIENT.get(&url)
             .header("Cookie", format!("session={}", cookie))
@@ -26,11 +27,10 @@ pub async fn verify_session(cookie: &str) -> Option<String> {
 struct LinkPayload<'a> { discord_id: &'a str, discord_username: &'a str }
 
 pub async fn link_discord(user_id: &str, discord_id: &str, discord_username: &str) -> bool {
-    let url = format!(
-        "{}/internal/user/discord-link/{}",
-        env::var("MAIN_API_URL").ok()?,
-        user_id
-    );
+    let url = match env::var("MAIN_API_URL") {
+        Ok(u) => format!("{}/internal/user/discord-link/{}", u, user_id),
+        Err(_) => return false,
+    };
 
     CLIENT.post(&url)
         .json(&LinkPayload { discord_id, discord_username })

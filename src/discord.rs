@@ -29,20 +29,20 @@ pub async fn exchange_code(code: &str) -> Option<String> {
     let redirect_uri = env::var("DISCORD_REDIRECT_URI").ok()?;
 
     #[derive(Deserialize)]
-    struct T { access_token: String }
+    struct Token { access_token: String }
 
     Some(
         CLIENT.post("https://discord.com/api/oauth2/token")
             .form(&[
-                ("client_id", &client_id),
-                ("client_secret", &client_secret),
+                ("client_id", client_id.as_str()),
+                ("client_secret", client_secret.as_str()),
                 ("grant_type", "authorization_code"),
                 ("code", code),
-                ("redirect_uri", &redirect_uri),
+                ("redirect_uri", redirect_uri.as_str()),
                 ("scope", "identify")
             ])
             .send().await.ok()?
-            .json::<T>().await.ok()?
+            .json::<Token>().await.ok()?
             .access_token
     )
 }

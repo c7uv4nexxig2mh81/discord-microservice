@@ -1,8 +1,8 @@
 // src/routes.rs
 use actix_web::{web, get, HttpResponse, HttpRequest, Responder};
-use serde_json::json;
-use std::collections::HashMap;
 use uuid::Uuid;
+use std::collections::HashMap;
+use serde_json::json;
 
 use crate::{discord, session};
 
@@ -20,9 +20,12 @@ pub async fn discord_callback(query: web::Query<HashMap<String, String>>, req: H
         None => return HttpResponse::BadRequest().body("Missing code"),
     };
 
-    let user_id = match req.cookie("session").and_then(|c| Some(c.value().to_string()))
-        .and_then(|c| futures::executor::block_on(session::verify_session(&c)))
-    {
+    let cookie = match req.cookie("session") {
+        Some(c) => c.value().to_string(),
+        None => return HttpResponse::Unauthorized().body("Missing session cookie"),
+    };
+
+    let user_id = match session::verify_session(&cookie).await {
         Some(id) => id,
         None => return HttpResponse::Unauthorized().body("Invalid session"),
     };
