@@ -1,4 +1,5 @@
 use actix_web::{App, HttpServer};
+
 mod config;
 mod routes;
 mod discord;
@@ -6,14 +7,14 @@ mod session;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // Initialize configuration and logger
-    let _cfg = config::init();
+    // Initialize configuration + logger once
+    let _config = config::init();
 
-    log::info!("listening OAuth microservice on 0.0.0.0:8080");
+    log::info!("OAuth microservice listening on 0.0.0.0:8080");
 
     HttpServer::new(|| {
         App::new()
-            .configure(routes::init) // Mount all routes
+            .configure(routes::init)
     })
     .bind(("0.0.0.0", 8080))?
     .run()

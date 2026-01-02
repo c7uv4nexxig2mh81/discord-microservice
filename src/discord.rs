@@ -1,12 +1,20 @@
 // src/discord.rs
-use serde::Deserialize;
+
 use once_cell::sync::Lazy;
-use reqwest::Client;
-use std::env;
+use reqwest::{Client, StatusCode};
+use serde::Deserialize;
+use thiserror::Error;
 use urlencoding::encode;
+
+use crate::config::Config;
 
 static CLIENT: Lazy<Client> = Lazy::new(Client::new);
 
+const DISCORD_API: &str = "https://discord.com/api";
+const OAUTH_AUTHORIZE: &str = "https://discord.com/api/oauth2/authorize";
+const OAUTH_TOKEN: &str = "https://discord.com/api/oauth2/token";
+
+/// Discord OAuth user
 #[derive(Debug, Deserialize)]
 pub struct DiscordUser {
     pub id: String,
@@ -14,44 +22,78 @@ pub struct DiscordUser {
     pub discriminator: String,
 }
 
-pub fn build_oauth_url(state: &str) -> String {
+/// Discord OAuth errors
+#[derive(Debug, Error)]
+pub enum DiscordError {
+    #[error("Discord API request failed")]
+    RequestFailed,
+
+    #[error("Unexpected Discord response status: {0}")]
+    BadStatus(StatusCode),
+
+    #[error("Failed to parse Discord response")]
+    ParseError,
+}
+
+/// Build Discord OAuth URL
+pub fn build_oauth_url(config: &Config, state: &str) -> String {
     format!(
-        "https://discord.com/api/oauth2/authorize?client_id={}&redirect_uri={}&response_type=code&scope=identify&state={}",
-        env::var("DISCORD_CLIENT_ID").expect("DISCORD_CLIENT_ID must be set"),
-        encode(&env::var("DISCORD_REDIRECT_URI").expect("DISCORD_REDIRECT_URI must be set")),
-        state
+        "{url}?client_id={client_id}&redirect_uri={redirect}&response_type=code&scope=identify&state={state}",
+        url = OAUTH_AUTHORIZE,
+        client_id = config.discord_client_id,
+        redirect = encode(&config.discord_redirect_uri),
+        state = encode(state),
     )
 }
 
-pub async fn exchange_code(code: &str) -> Option<String> {
-    let client_id = env::var("DISCORD_CLIENT_ID").ok()?;
-    let client_secret = env::var("DISCORD_CLIENT_SECRET").ok()?;
-    let redirect_uri = env::var("DISCORD_REDIRECT_URI").ok()?;
-
+/// Exchange OAuth code for access token
+pub async fn exchange_code(
+    config: &Config,
+    code: &str,
+) -> Result<String, DiscordError> {
     #[derive(Deserialize)]
-    struct Token { access_token: String }
+    struct TokenResponse {
+        access_token: String,
+    }
 
-    Some(
-        CLIENT.post("https://discord.com/api/oauth2/token")
-            .form(&[
-                ("client_id", client_id.as_str()),
-                ("client_secret", client_secret.as_str()),
-                ("grant_type", "authorization_code"),
-                ("code", code),
-                ("redirect_uri", redirect_uri.as_str()),
-                ("scope", "identify")
-            ])
-            .send().await.ok()?
-            .json::<Token>().await.ok()?
-            .access_token
-    )
+    let res = CLIENT
+        .post(OAUTH_TOKEN)
+        .form(&[
+            ("client_id", config.discord_client_id.as_str()),
+            ("client_secret", config.discord_client_secret.as_str()),
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", config.discord_redirect_uri.as_str()),
+            ("scope", "identify"),
+        ])
+        .send()
+        .await
+        .map_err(|_| DiscordError::RequestFailed)?;
+
+    if !res.status().is_success() {
+        return Err(DiscordError::BadStatus(res.status()));
+    }
+
+    res.json::<TokenResponse>()
+        .await
+        .map(|t| t.access_token)
+        .map_err(|_| DiscordError::ParseError)
 }
 
-pub async fn get_user_info(token: &str) -> Option<DiscordUser> {
-    Some(
-        CLIENT.get("https://discord.com/api/users/@me")
-            .bearer_auth(token)
-            .send().await.ok()?
-            .json::<DiscordUser>().await.ok()?
-    )
+/// Fetch Discord user info
+pub async fn get_user_info(token: &str) -> Result<DiscordUser, DiscordError> {
+    let res = CLIENT
+        .get(format!("{}/users/@me", DISCORD_API))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|_| DiscordError::RequestFailed)?;
+
+    if !res.status().is_success() {
+        return Err(DiscordError::BadStatus(res.status()));
+    }
+
+    res.json::<DiscordUser>()
+        .await
+        .map_err(|_| DiscordError::ParseError)
 }

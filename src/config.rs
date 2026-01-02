@@ -1,6 +1,11 @@
 // src/config.rs
+
 use dotenv::dotenv;
-use std::env;
+use std::{env, fmt};
+use once_cell::sync::OnceCell;
+
+/// Global config instance
+static CONFIG: OnceCell<Config> = OnceCell::new();
 
 /// App configuration
 #[derive(Clone, Debug)]
@@ -12,34 +17,60 @@ pub struct Config {
     pub log_level: String,
 }
 
-impl Config {
-    /// Load configuration from environment variables
-    pub fn from_env() -> Self {
-        dotenv().ok();
+/// Config loading error
+#[derive(Debug)]
+pub enum ConfigError {
+    MissingVar(&'static str),
+}
 
-        Self {
-            discord_client_id: get_env("DISCORD_CLIENT_ID"),
-            discord_client_secret: get_env("DISCORD_CLIENT_SECRET"),
-            discord_redirect_uri: get_env("DISCORD_REDIRECT_URI"),
-            main_api_url: get_env("MAIN_API_URL"),
-            log_level: env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
+impl fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingVar(key) => write!(f, "Missing required environment variable: {}", key),
         }
     }
 }
 
-/// Helper to read env variable or panic if missing
-fn get_env(key: &str) -> String {
-    env::var(key).unwrap_or_else(|_| panic!("Environment variable {} is not set", key))
+impl std::error::Error for ConfigError {}
+
+impl Config {
+    /// Load configuration from environment variables
+    pub fn from_env() -> Result<Self, ConfigError> {
+        dotenv().ok();
+
+        Ok(Self {
+            discord_client_id: required("DISCORD_CLIENT_ID")?,
+            discord_client_secret: required("DISCORD_CLIENT_SECRET")?,
+            discord_redirect_uri: required("DISCORD_REDIRECT_URI")?,
+            main_api_url: required("MAIN_API_URL")?,
+            log_level: env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
+        })
+    }
 }
 
-/// Initialize configuration and logging
-pub fn init() -> Config {
-    let config = Config::from_env();
+/// Read a required environment variable
+fn required(key: &'static str) -> Result<String, ConfigError> {
+    env::var(key).map_err(|_| ConfigError::MissingVar(key))
+}
 
-    // Initialize logger
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&config.log_level))
-        .init();
+/// Initialize configuration + logging (safe to call multiple times)
+pub fn init() -> &'static Config {
+    CONFIG.get_or_init(|| {
+        let config = Config::from_env()
+            .unwrap_or_else(|e| panic!("Configuration error: {}", e));
 
-    log::info!("Configuration loaded successfully");
-    config
+        init_logger(&config.log_level);
+
+        log::info!("Configuration loaded");
+        config
+    })
+}
+
+/// Initialize logger once
+fn init_logger(level: &str) {
+    use env_logger::{Builder, Env};
+
+    let _ = Builder::from_env(Env::default().default_filter_or(level))
+        .is_test(cfg!(test))
+        .try_init();
 }
